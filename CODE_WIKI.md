@@ -127,12 +127,18 @@ video-qrcode-sharing/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET /status` | 获取隧道状态 | 返回 `{ active, url }` |
-| `POST /start` | 启动隧道 | 调用 `localtunnel({ port })` |
-| `POST /stop` | 停止隧道 | 关闭隧道连接 |
+| `POST /start` | 启动隧道 | 通过 `child_process.spawn` 启动 `cpolar http {port}` |
+| `POST /stop` | 停止隧道 | 终止 cpolar 子进程 |
 
-**模块级状态**: `tunnel` 和 `tunnelUrl` 为模块内全局变量，维护当前隧道实例。
+**实现方式**: 通过 `child_process.spawn` 启动 cpolar CLI 进程，解析其 stdout/stderr 输出中的 `Forwarding` 行提取 https 公网地址。
+
+**模块级状态**: `cpolarProcess` 和 `tunnelUrl` 为模块内全局变量，维护当前 cpolar 进程和隧道 URL。
 
 **导出函数**: `getTunnelUrl()` — 供 `qrcode.js` 获取当前隧道 URL。
+
+**前置条件**:
+1. 系统需安装 cpolar: `curl -L https://www.cpolar.com/static/downloads/install-release-cpolar.sh | sudo bash`
+2. 需配置 authtoken: `cpolar authtoken <你的令牌>`（在 cpolar 官网注册后获取）
 
 ### 3.5 网络工具 - `server/utils/network.js`
 
@@ -332,40 +338,56 @@ npm run start    # 启动 Express 服务（直接服务 dist/）
 
 ---
 
-## 9. 外网访问（内网穿透）机制分析
+## 9. 外网访问（内网穿透）机制
 
 ### 9.1 当前实现
 
-项目使用 **localtunnel** 作为内网穿透方案：
+项目使用 **cpolar**（国内节点）作为内网穿透方案：
 
 1. 用户在主页点击"开启"外网访问
 2. 前端调用 `POST /api/tunnel/start`
-3. 后端调用 `localtunnel({ port: 3000 })` 创建隧道
-4. localtunnel 返回一个 `https://xxx-xx-xx-xx-xx.loca.lt` 格式的公网 URL
+3. 后端通过 `child_process.spawn` 启动 `cpolar http {port}` 进程
+4. 解析 cpolar 输出中的 `Forwarding` 行，提取 `https://xxx.r1.cpolar.top` 格式的公网 URL
 5. 二维码生成时，外网模式使用该 URL 拼接播放路径
 
-### 9.2 中国访问视频失败的原因分析
+### 9.2 前置条件
 
-**核心问题**: localtunnel 的服务器部署在海外，中国网络环境下存在以下障碍：
+1. **安装 cpolar**:
+   ```bash
+   curl -L https://www.cpolar.com/static/downloads/install-release-cpolar.sh | sudo bash
+   ```
+2. **配置 authtoken**（在 [cpolar 官网](https://www.cpolar.com) 注册后获取）:
+   ```bash
+   cpolar authtoken <你的令牌>
+   ```
 
-1. **DNS 污染/解析失败**: `loca.lt` 域名在中国可能被 DNS 污染或无法解析
-2. **连接不稳定**: 即使 DNS 解析成功，到 localtunnel 服务器的网络延迟极高，容易超时
-3. **视频流传输带宽不足**: 视频播放需要持续稳定的带宽，localtunnel 的海外服务器无法提供足够的带宽
-4. **HTTPS 证书问题**: localtunnel 使用自签名证书，某些浏览器会阻止访问
-5. **隧道不稳定**: localtunnel 免费版隧道容易断连，每次重启 URL 会变化
+### 9.3 cpolar vs localtunnel 对比
 
-### 9.3 可行的替代方案
+| 特性 | localtunnel（旧） | cpolar（新） |
+|------|-------------------|-------------|
+| 服务器位置 | 海外 | 国内（China Top 节点） |
+| 中国访问 | DNS 污染、连接不稳定 | 稳定可达 |
+| 视频流带宽 | 不足 | 国内节点带宽充足 |
+| HTTPS | 自签名证书，浏览器警告 | 正规证书，无警告 |
+| 集成方式 | npm 包（Node.js API） | CLI 工具（child_process） |
+| 隧道稳定性 | 免费版易断连 | 较稳定 |
+| 固定域名 | 不支持 | 支持二级子域名（付费） |
 
-| 方案 | 说明 | 优势 | 劣势 |
-|------|------|------|------|
-| **cpolar** | 国内内网穿透服务 | 国内节点，速度快稳定 | 免费版带宽有限 |
-| **ngrok (中国版)** | ngrok 中国镜像 | 国内可访问 | 需注册账号 |
-| **frp** | 自建内网穿透 | 完全可控，需有公网服务器 | 需要额外服务器 |
-| **Cloudflare Tunnel** | Cloudflare 提供的隧道 | 免费、稳定 | 中国部分地区访问不稳定 |
-| **花生壳** | 老牌国内内网穿透 | 国内服务稳定 | 免费版限制较多 |
-| **替换为直连公网IP** | 服务器有公网 IP 时直接暴露 | 无第三方依赖 | 需要公网 IP |
+### 9.4 进阶配置
 
-**推荐方案**: 将 localtunnel 替换为 **cpolar** 或 **frp**，修改 `server/routes/tunnel.js` 中的隧道实现即可，API 接口保持不变。
+**固定二级子域名**（避免每次重启 URL 变化）:
+1. 登录 [cpolar 官网后台](https://dashboard.cpolar.com)，在"预留"中保留二级子域名
+2. 修改 cpolar 配置文件（默认路径 `/usr/local/etc/cpolar/cpolar.yml`）:
+   ```yaml
+   authtoken: <你的令牌>
+   tunnels:
+     video-share:
+       proto: http
+       addr: "3000"
+       subdomain: your-name
+       region: cn
+   ```
+3. 使用 `cpolar start-all` 启动所有配置隧道
 
 ---
 
@@ -409,8 +431,9 @@ npm run start    # 启动 Express 服务（直接服务 dist/）
 用户点击"开启"外网访问
   → Home.toggleTunnel()
     → POST /api/tunnel/start
-      → tunnel.js: localtunnel({ port: 3000 })
-      → 返回 { url: "https://xxx.loca.lt" }
+      → tunnel.js: spawn('cpolar', ['http', String(port)])
+      → 解析 cpolar 输出中的 Forwarding 行
+      → 返回 { url: "https://xxx.r1.cpolar.top" }
     → tunnelActive = true
   → 手机扫码时 mode=wan
     → 二维码 URL 使用 tunnelUrl
