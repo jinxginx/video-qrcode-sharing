@@ -9,7 +9,7 @@
 **技术栈**:
 - 前端: Vue 3 + Vue Router 4 + Vite 6
 - 后端: Express 4 + Multer
-- 内网穿透: localtunnel
+- 内网穿透: cpolar（国内节点）
 - 二维码生成: qrcode
 
 ---
@@ -23,7 +23,7 @@ video-qrcode-sharing/
 │   ├── routes/
 │   │   ├── video.js          # 视频上传/列表/流式播放/删除 API
 │   │   ├── qrcode.js         # 二维码生成 API
-│   │   └── tunnel.js         # 外网隧道（localtunnel）管理 API
+│   │   └── tunnel.js         # 外网隧道（cpolar）管理 API
 │   └── utils/
 │       └── network.js        # 获取本机局域网 IP
 ├── src/                       # 前端源码
@@ -227,7 +227,7 @@ video-qrcode-sharing/
 | `multer` | ^1.4.5-lts.2 | 文件上传中间件 |
 | `cors` | ^2.8.5 | 跨域支持 |
 | `qrcode` | ^1.5.4 | 二维码生成 |
-| `localtunnel` | ^2.0.2 | 内网穿透（将本地服务暴露到公网） |
+| `localtunnel` | ^2.0.2 | 内网穿透（将本地服务暴露到公网）— **已替换为 cpolar** |
 | `http-proxy-middleware` | ^4.1.1 | 开发模式反向代理到 Vite |
 | `vue` | ^3.5.0 | 前端框架 |
 | `vue-router` | ^4.5.0 | 前端路由 |
@@ -250,7 +250,7 @@ server/index.js
   │     ├── server/utils/network.js
   │     └── server/routes/tunnel.js (getTunnelUrl)
   ├── server/routes/tunnel.js
-  │     └── localtunnel
+│     └── cpolar CLI (child_process)
   └── server/utils/network.js
 
 src/views/Home.vue
