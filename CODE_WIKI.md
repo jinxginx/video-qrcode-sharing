@@ -127,18 +127,22 @@ video-qrcode-sharing/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET /status` | 获取隧道状态 | 返回 `{ active, url }` |
-| `POST /start` | 启动隧道 | 通过 `child_process.spawn` 启动 `cpolar http {port}` |
+| `POST /start` | 启动隧道 | 通过 `child_process.spawn` 启动 `cpolar http {port} -log=stdout -log-level=INFO` |
 | `POST /stop` | 停止隧道 | 终止 cpolar 子进程 |
 
-**实现方式**: 通过 `child_process.spawn` 启动 cpolar CLI 进程，解析其 stdout/stderr 输出中的 `Forwarding` 行提取 https 公网地址。
+**实现方式**: 通过 `child_process.spawn` 启动 cpolar CLI 进程，解析其 stdout 输出中的 `Tunnel established at https://...` 行提取 https 公网地址。
+
+**cpolar 路径自动查找**: 代码会按以下顺序自动查找 cpolar：
+1. 系统 PATH 环境变量（`where cpolar` / `which cpolar`）
+2. Windows 常见安装路径（`C:\Program Files\cpolar\cpolar.exe` 等）
+3. 降级为 `cpolar`，由系统自行解析
 
 **模块级状态**: `cpolarProcess` 和 `tunnelUrl` 为模块内全局变量，维护当前 cpolar 进程和隧道 URL。
 
 **导出函数**: `getTunnelUrl()` — 供 `qrcode.js` 获取当前隧道 URL。
 
 **前置条件**:
-1. 系统需安装 cpolar: `curl -L https://www.cpolar.com/static/downloads/install-release-cpolar.sh | sudo bash`
-2. 需配置 authtoken: `cpolar authtoken <你的令牌>`（在 cpolar 官网注册后获取）
+1. 系统需安装 cpolar 并配置 authtoken（详见第 9 节）
 
 ### 3.5 网络工具 - `server/utils/network.js`
 
@@ -346,22 +350,87 @@ npm run start    # 启动 Express 服务（直接服务 dist/）
 
 1. 用户在主页点击"开启"外网访问
 2. 前端调用 `POST /api/tunnel/start`
-3. 后端通过 `child_process.spawn` 启动 `cpolar http {port}` 进程
-4. 解析 cpolar 输出中的 `Forwarding` 行，提取 `https://xxx.r1.cpolar.top` 格式的公网 URL
+3. 后端通过 `child_process.spawn` 启动 `cpolar http {port} -log=stdout -log-level=INFO` 进程
+4. 解析 cpolar 输出中的 `Tunnel established at https://xxx.cpolar.top` 行，提取公网 URL
 5. 二维码生成时，外网模式使用该 URL 拼接播放路径
 
-### 9.2 前置条件
+> **注意**: cpolar 是独立的外部软件，不包含在本项目中。需要用户自行安装和配置。
 
-1. **安装 cpolar**:
+### 9.2 cpolar 安装
+
+#### Windows
+
+1. 在 [cpolar 官网下载页](https://www.cpolar.com/download) 下载 Windows 64-bit 安装包
+2. 解压后双击 `.msi` 安装包，一路默认安装即可
+3. 安装完成后，建议将 cpolar 安装目录加入系统 PATH 环境变量，这样项目代码可以自动找到它
+
+#### Linux
+
+```bash
+# 一键自动安装
+curl -L https://www.cpolar.com/static/downloads/install-release-cpolar.sh | sudo bash
+```
+
+#### macOS
+
+```bash
+# 通过 Homebrew 安装
+brew install cpolar
+```
+
+### 9.3 cpolar 配置 authtoken
+
+安装完成后，必须配置认证令牌才能使用：
+
+1. 在 [cpolar 官网](https://www.cpolar.com) 注册账号
+2. 登录后进入后台，复制你的 authtoken
+3. 在命令行执行：
+
+```bash
+cpolar authtoken <你的令牌>
+```
+
+配置成功后会提示：`Authtoken saved to configuration file`
+
+> **注意**: authtoken 配置只需执行一次，会保存在本地配置文件中。Windows 默认路径为 `C:\Users\<用户名>\.cpolar\cpolar.yml`
+
+### 9.4 cpolar 使用方式
+
+#### 方式一：项目自动管理（推荐）
+
+直接在项目页面点击"开启外网访问"按钮，后端会自动启动 cpolar 隧道。无需手动操作。
+
+前提：cpolar 已安装且在 PATH 中，或安装在代码能自动查找到的路径。
+
+#### 方式二：Web UI 手动管理
+
+1. 启动 cpolar 客户端服务：
    ```bash
-   curl -L https://www.cpolar.com/static/downloads/install-release-cpolar.sh | sudo bash
-   ```
-2. **配置 authtoken**（在 [cpolar 官网](https://www.cpolar.com) 注册后获取）:
-   ```bash
-   cpolar authtoken <你的令牌>
+   # 方式 A：安装为系统服务（需管理员权限，开机自启）
+   cpolar service install
+   cpolar service start
+
+   # 方式 B：前台启动（关闭终端即停止）
+   cpolar http 3000 -log=stdout -log-level=INFO
    ```
 
-### 9.3 cpolar vs localtunnel 对比
+2. 打开 Web 管理界面：http://localhost:9200
+3. 在"隧道管理"中创建、启动、停止隧道
+4. 查看分配的公网地址
+
+#### 方式三：命令行手动启动
+
+```bash
+# 启动 HTTP 隧道，映射本地 3000 端口
+cpolar http 3000 -log=stdout -log-level=INFO
+
+# 启动时指定固定子域名（需付费预留）
+cpolar http 3000 -subdomain=your-name -log=stdout -log-level=INFO
+```
+
+> **Windows 注意事项**: 在 Windows 上 cpolar 默认不输出日志到控制台，必须添加 `-log=stdout -log-level=INFO` 参数才能捕获输出。项目代码已自动添加此参数。
+
+### 9.5 cpolar vs localtunnel 对比
 
 | 特性 | localtunnel（旧） | cpolar（新） |
 |------|-------------------|-------------|
@@ -372,12 +441,15 @@ npm run start    # 启动 Express 服务（直接服务 dist/）
 | 集成方式 | npm 包（Node.js API） | CLI 工具（child_process） |
 | 隧道稳定性 | 免费版易断连 | 较稳定 |
 | 固定域名 | 不支持 | 支持二级子域名（付费） |
+| 是否包含在项目中 | 是（npm 依赖） | 否（需独立安装） |
 
-### 9.4 进阶配置
+### 9.6 进阶配置
 
 **固定二级子域名**（避免每次重启 URL 变化）:
 1. 登录 [cpolar 官网后台](https://dashboard.cpolar.com)，在"预留"中保留二级子域名
-2. 修改 cpolar 配置文件（默认路径 `/usr/local/etc/cpolar/cpolar.yml`）:
+2. 修改 cpolar 配置文件：
+   - Windows: `C:\Users\<用户名>\.cpolar\cpolar.yml`
+   - Linux/macOS: `/usr/local/etc/cpolar/cpolar.yml` 或 `~/.cpolar/cpolar.yml`
    ```yaml
    authtoken: <你的令牌>
    tunnels:
@@ -387,7 +459,17 @@ npm run start    # 启动 Express 服务（直接服务 dist/）
        subdomain: your-name
        region: cn
    ```
-3. 使用 `cpolar start-all` 启动所有配置隧道
+3. 使用 `cpolar start video-share` 启动指定隧道，或 `cpolar start-all` 启动所有配置隧道
+
+### 9.7 常见问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 页面提示"cpolar 未安装" | cpolar 不在 PATH 中 | 将 cpolar 安装目录加入系统环境变量 PATH |
+| 隧道启动超时 | 未配置 authtoken | 执行 `cpolar authtoken <令牌>` |
+| 手机访问提示无法打开 | URL 末尾有多余字符或使用了 http | 确保使用 https 开头的地址 |
+| 浏览器提示证书警告 | cpolar 免费版随机域名 | 点击"继续访问"即可，或使用固定子域名 |
+| 每次重启 URL 变化 | 免费版使用随机子域名 | 付费预留固定二级子域名 |
 
 ---
 
@@ -431,9 +513,10 @@ npm run start    # 启动 Express 服务（直接服务 dist/）
 用户点击"开启"外网访问
   → Home.toggleTunnel()
     → POST /api/tunnel/start
-      → tunnel.js: spawn('cpolar', ['http', String(port)])
-      → 解析 cpolar 输出中的 Forwarding 行
-      → 返回 { url: "https://xxx.r1.cpolar.top" }
+      → tunnel.js: 自动查找 cpolar 路径
+      → spawn(cpolarPath, ['http', port, '-log=stdout', '-log-level=INFO'])
+      → 解析 cpolar 输出中的 "Tunnel established at https://..." 行
+      → 返回 { url: "https://xxx.cpolar.top" }
     → tunnelActive = true
   → 手机扫码时 mode=wan
     → 二维码 URL 使用 tunnelUrl

@@ -3,3 +3,6 @@ dist/
 uploads/
 *.local
 .DS_Store
+.trae/
+cpolar-setup/
+*.zip
